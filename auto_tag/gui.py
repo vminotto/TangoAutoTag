@@ -169,7 +169,7 @@ class MP3RenamerGUI:
                                                          shazam,
                                                          modify=False,
                                                          delay=10,
-                                                         nbrRetry=3,
+                                                         num_retries=3,
                                                          trace=False)
                 # Set apply to False if no title, artist, or album is found
                 if result.get("title") == "Unknown Title" or result.get(

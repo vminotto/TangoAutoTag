@@ -35,7 +35,7 @@ def update_mp3_cover_art(file_path, cover_url, trace):
     audiofile.tag.save()
 
 
-def update_mp3_tags(file_path: str, title: str, artist: str, album: str):
+def update_mp3_tags(file_path: str, title: str, artist: str, album: str, year: str):
     """
     Update the MP3 tags of the given file with the specified title and artist.
 
@@ -52,64 +52,18 @@ def update_mp3_tags(file_path: str, title: str, artist: str, album: str):
     audiofile.tag.title = title
     audiofile.tag.artist = artist
     audiofile.tag.album = album
+    audiofile.tag.year = year
     audiofile.tag.save()
 
 
-def sanitize_string(filename, trace):
-    """
-    Sanitize the filename to remove invalid characters, adjust casing, and transliterate to Latin characters.
-    Ensures the filename is not empty after transformations. If transliteration results in an empty string,
-    uses the original filename with non-Unicode characters.
 
-    Parameters:
-    - filename: The original filename to be sanitized.
-
-    Returns:
-    - A sanitized, safe filename with adjustments made for file system compatibility.
-    """
-    original_filename = filename  # Store the original filename
-    filename = unidecode(filename)  # Attempt to transliterate to ASCII
-
-    # Manually remove content within parentheses
-    new_filename = ""
-    skip = 0
-    for char in filename:
-        if char == "(":
-            skip += 1
-        elif char == ")" and skip > 0:
-            skip -= 1
-        elif skip == 0:
-            new_filename += char
-    filename = new_filename
-
-    # Revert to the original filename if transliteration results in an empty string
-    if not filename.strip():
-        filename = original_filename
-
-    invalid_chars = '<>:"/\\|?*'
-    for char in invalid_chars:
-        # Remove invalid file name characters
-        filename = filename.replace(char, "")
-    filename = filename.replace("&", "-")  # Replace '&' with '-'
-    # Change uppercase words to capitalize (first letter uppercase, rest lowercase)
-    filename = " ".join(word.capitalize() for word in filename.split())
-
-    if not filename.strip():
-        if trace:
-            print("\nWarning: Filename became empty after sanitization.")
-        filename = "Unknown song"  # Default filename if all else fails
-
-    return filename
 
 
 async def recognize_and_rename_song(
     file_path: str,
-    file_name: str,
     shazam: Shazam,
-    modify=True,
     delay=10,
-    nbrRetry=3,
-    trace=False,
+    num_retries=3
 ):
     """
     Recognize a song using Shazam, rename the MP3 file based on the song title and artist,
@@ -122,7 +76,7 @@ async def recognize_and_rename_song(
     attempt = 0
     out = None
     errorStr = ""
-    while attempt < nbrRetry:
+    while attempt < num_retries:
         try:
             out = await shazam.recognize(file_path)
             if out:  # Assuming 'out' being non-empty means success
@@ -131,37 +85,35 @@ async def recognize_and_rename_song(
             errorStr = f"Exception : {e}"
             print(errorStr)
             attempt += 1
-        if attempt < nbrRetry:
+        if attempt < num_retries:
             await asyncio.sleep(delay)
 
     if out is None:
-        if trace:
-            print(
-                f"\nFailed to recognize {file_name} after {nbrRetry} attempts. Error {errorStr}"
-            )
-        return {"file_path": file_name, "error": "Could not recognize file"}
+        print(f"\nFailed to recognize {file_path} after {num_retries} attempts. Error {errorStr}")
+        return {"file_path": file_path, "error": "Could not recognize file"}
 
     # Extract necessary information from recognition result
-    track_info = out.get("track", {})
-    title = track_info.get("title", "Unknown Title")
+    track_info\\\ = out.get("track", {})
+    title = track_info.get("title")
     author = track_info.get("subtitle", "Unknown Artist")
     album = find_deepest_metadata_key(track_info, "Album") or "Unknown Album"
+    year = find_deepest_metadata_key(track_info, "Released") or "Unknown Year"
     images = track_info.get("images", {})
     cover_link = images.get("coverart", "")  # Default to empty if no cover art
-    if title == "Unknown Title" and trace:
-        print(f"\nCould not recognize {file_name}, will not modify it.")
-        return {"file_path": file_name, "error": "Could not recognize file"}
+    if not title:
+        print(f"\nCould not recognize {file_path}, will not modify it.")
+        return {"file_path": file_path, "error": "Could not recognize file"}
 
     # Sanitize, rename, and update MP3 file
-    sanitized_title = sanitize_string(title, trace)
-    sanitized_author = sanitize_string(author, trace)
-    sanitized_album = sanitize_string(album, trace)
-    new_filename_components = [
-        sanitized_title, sanitized_author, sanitized_album
-    ]
-    new_filename = " - ".join(filter(None, new_filename_components)) + ".mp3"
+    sanitized_title = sanitize_string(title)
+    sanitized_author = sanitize_string(author)
+    sanitized_album = sanitize_string(album)
+
     directory = os.path.dirname(file_path)
-    new_file_path = os.path.join(directory, new_filename)
+
+    filename, file_extension = os.path.splitext('/path/to/somefile.ext')
+
+    new_file_path = os.path.join(directory, title + ".mp3")
 
     # Check if a file with the new name already exists and append a number to make it unique
     counter = 1
@@ -184,7 +136,7 @@ async def recognize_and_rename_song(
         # Update tags and cover art
         try:
             update_mp3_tags(new_file_path, sanitized_title, sanitized_author,
-                            sanitized_album)
+                            sanitized_album, year)
         except Exception as e:
             if trace:
                 print(f"\nError updating mp3 tag {file_path}: {e}")
